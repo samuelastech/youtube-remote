@@ -63,6 +63,12 @@ func executeCommand(cmd Command) {
 		err = sendKeyPress("up")
 	case "volumeDown":
 		err = sendKeyPress("down")
+	case "open":
+		if cmd.Value != "" {
+			err = openYouTubeURL(cmd.Value)
+		} else {
+			err = fmt.Errorf("no URL provided")
+		}
 	}
 
 	if err != nil {
@@ -83,6 +89,20 @@ func sendKeyPress(key string) error {
 				end tell
 			end tell
 		`, key)
+		cmd := exec.Command("osascript", "-e", script)
+		return cmd.Run()
+	}
+	return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+}
+
+func openYouTubeURL(url string) error {
+	if runtime.GOOS == "darwin" {
+		script := fmt.Sprintf(`
+			tell application "Google Chrome"
+				activate
+				open location "%s"
+			end tell
+		`, url)
 		cmd := exec.Command("osascript", "-e", script)
 		return cmd.Run()
 	}

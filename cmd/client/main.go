@@ -34,6 +34,7 @@ func main() {
 	fmt.Println("- previous: Previous video")
 	fmt.Println("- volumeUp: Increase volume")
 	fmt.Println("- volumeDown: Decrease volume")
+	fmt.Println("- open <url>: Open YouTube URL")
 	fmt.Println("- quit: Exit the application")
 
 	scanner := bufio.NewScanner(os.Stdin)
@@ -50,7 +51,16 @@ func main() {
 			break
 		}
 
-		cmd := Command{Action: input}
+		parts := strings.SplitN(input, " ", 2)
+		action := parts[0]
+
+		var cmd Command
+		if action == "open" && len(parts) > 1 {
+			cmd = Command{Action: action, Value: parts[1]}
+		} else {
+			cmd = Command{Action: action}
+		}
+
 		err := encoder.Encode(cmd)
 		if err != nil {
 			log.Printf("Error sending command: %v\n", err)
