@@ -1,12 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"os"
 	"os/exec"
+	"os/signal"
 	"runtime"
+	"syscall"
+	"strings"
 
 	"github.com/gorilla/websocket"
 )
@@ -22,25 +28,53 @@ var upgrader = websocket.Upgrader{
 	},
 }
 
+const (
+	serverPort = 8080
+)
+
 func main() {
 	// Set up logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 	log.Println("Starting YouTube Remote Control server...")
 
+
+
 	// Create a router for our web server
 	mux := http.NewServeMux()
+
+	// Serve static files
+	fs := http.FileServer(http.Dir("web/static"))
+	mux.Handle("/", fs)
 
 	// WebSocket endpoint
 	mux.HandleFunc("/ws", handleWebSocket)
 
 	// Start HTTP/WebSocket server
-	server := &http.Server{
-		Addr:    ":8082",
+	httpServer := &http.Server{
+		Addr:    fmt.Sprintf("0.0.0.0:%d", serverPort),
 		Handler: mux,
 	}
 
-	log.Printf("Web server listening on http://localhost:8082")
-	if err := server.ListenAndServe(); err != nil {
+	networkIPs := getNetworkIPs()
+	log.Printf("\nYouTube Remote Control is running!\n")
+	log.Printf("\nAccess from your devices using any of these addresses:\n")
+	for _, ip := range networkIPs {
+		log.Printf("http://%s:%d\n", ip, serverPort)
+	}
+
+	// Handle graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
+
+	go func() {
+		<-sigChan
+		log.Println("Shutting down server...")
+		if err := httpServer.Shutdown(context.Background()); err != nil {
+			log.Printf("HTTP server Shutdown: %v", err)
+		}
+	}()
+
+	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		log.Fatal("Failed to start web server:", err)
 	}
 }
@@ -149,4 +183,53 @@ func openYouTubeURL(url string) error {
 		return cmd.Run()
 	}
 	return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
+}
+
+func getNetworkIPs() []string {
+	var ips []string
+
+	// Always include localhost for local access
+	ips = append(ips, "localhost")
+
+	// Get all network interfaces
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		log.Printf("Failed to get network interfaces: %v\n", err)
+		return ips
+	}
+
+	// For each interface
+	for _, iface := range ifaces {
+		// Skip loopback and inactive interfaces
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+
+		// Get addresses for this interface
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+
+		// For each address
+		for _, addr := range addrs {
+			switch v := addr.(type) {
+			case *net.IPNet:
+				// Skip loopback and non-IPv4
+				ipv4 := v.IP.To4()
+				if ipv4 == nil || ipv4.IsLoopback() {
+					continue
+				}
+
+				// Only include private network IPs
+				ip := ipv4.String()
+				if strings.HasPrefix(ip, "192.168.") || strings.HasPrefix(ip, "10.") || strings.HasPrefix(ip, "172.") {
+					log.Printf("Found network interface: %s (%s) - %s\n", iface.Name, iface.HardwareAddr, ip)
+					ips = append(ips, ip)
+				}
+			}
+		}
+	}
+
+	return ips
 }
