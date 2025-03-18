@@ -167,6 +167,40 @@ func sendKeyPress(key string) error {
 		`, key)
 		cmd := exec.Command("osascript", "-e", script)
 		return cmd.Run()
+	} else if runtime.GOOS == "windows" {
+		// Map YouTube keyboard shortcuts to Windows virtual key codes
+		keyMap := map[string]string{
+			"k":     "{SPACE}",  // Play/Pause is space on YouTube
+			"l":     "n",        // Next is 'n' on YouTube
+			"j":     "p",        // Previous is 'p' on YouTube
+			"up":    "{UP}",     // Volume Up
+			"down":  "{DOWN}",   // Volume Down
+		}
+
+		mappedKey, exists := keyMap[key]
+		if !exists {
+			mappedKey = key
+		}
+
+		// PowerShell script to send keystrokes to Chrome
+		script := fmt.Sprintf(`
+			Add-Type -AssemblyName System.Windows.Forms
+			$chrome = Get-Process chrome -ErrorAction SilentlyContinue
+			if ($chrome) {
+				# Activate Chrome window
+				$wshell = New-Object -ComObject wscript.shell
+				$wshell.AppActivate($chrome[0].MainWindowTitle)
+				Start-Sleep -Milliseconds 100
+				# Send keystroke
+				[System.Windows.Forms.SendKeys]::SendWait("%s")
+			} else {
+				Write-Error "Chrome is not running"
+				exit 1
+			}
+		`, mappedKey)
+
+		cmd := exec.Command("powershell", "-Command", script)
+		return cmd.Run()
 	}
 	return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
 }
@@ -180,6 +214,36 @@ func openYouTubeURL(url string) error {
 			end tell
 		`, url)
 		cmd := exec.Command("osascript", "-e", script)
+		return cmd.Run()
+	} else if runtime.GOOS == "windows" {
+		// Ensure URL is properly formatted
+		if !strings.HasPrefix(url, "http") {
+			url = "https://" + url
+		}
+		
+		// PowerShell script to open URL in Chrome
+		script := fmt.Sprintf(`
+			$chrome = "C:\Program Files\Google\Chrome\Application\chrome.exe"
+			$chromeSxS = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
+			
+			if (Test-Path $chrome) {
+				Start-Process $chrome -ArgumentList "%s"
+			} elseif (Test-Path $chromeSxS) {
+				Start-Process $chromeSxS -ArgumentList "%s"
+			} else {
+				# Try to find Chrome in the registry
+				$regPath = "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\chrome.exe"
+				if (Test-Path $regPath) {
+					$chromePath = (Get-ItemProperty $regPath).'(Default)'
+					Start-Process $chromePath -ArgumentList "%s"
+				} else {
+					Write-Error "Chrome not found"
+					exit 1
+				}
+			}
+		`, url, url, url)
+
+		cmd := exec.Command("powershell", "-Command", script)
 		return cmd.Run()
 	}
 	return fmt.Errorf("unsupported operating system: %s", runtime.GOOS)
